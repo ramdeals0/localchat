@@ -1,0 +1,18 @@
+---
+description: Enforce fully local and offline LocalChat architecture
+alwaysApply: true
+---
+
+# LocalChat rules
+
+- This is a local-only product.
+- Never add a cloud LLM provider, remote API, telemetry SDK, analytics package,
+  external auth, CDN-hosted asset, or hosted database.
+- All model inference must call Ollama at http://127.0.0.1:11434.
+- Bind local services to 127.0.0.1 by default.
+- Never expose the Ollama service or app server to the LAN unless explicitly requested.
+- Persist chats in the local SQLite database only.
+- Treat model output as untrusted content; sanitize Markdown and never render raw HTML.
+- Prefer small, testable TypeScript modules.
+- Keep secrets in .env and ensure .env is gitignored.
+- Preserve offline behavior: no runtime network fetches outside localhost.
