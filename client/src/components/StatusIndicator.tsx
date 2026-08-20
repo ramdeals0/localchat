@@ -3,13 +3,33 @@ import type { OllamaStatus } from "@localchat/shared";
 interface StatusIndicatorProps {
   status: OllamaStatus | null;
   loading: boolean;
+  requireEmbedding?: boolean;
 }
 
-export function StatusIndicator({ status, loading }: StatusIndicatorProps) {
+function StatusDot({ tone }: { tone: "success" | "warning" | "danger" | "neutral" }) {
+  const colors = {
+    success: "bg-success",
+    warning: "bg-warning",
+    danger: "bg-danger",
+    neutral: "bg-secondary",
+  };
+  return (
+    <span
+      className={`inline-block h-2.5 w-2.5 rounded-full ${colors[tone]}`}
+      aria-hidden="true"
+    />
+  );
+}
+
+export function StatusIndicator({
+  status,
+  loading,
+  requireEmbedding = false,
+}: StatusIndicatorProps) {
   if (loading && !status) {
     return (
-      <span className="inline-flex items-center gap-2 text-sm text-gray-400">
-        <span className="h-2 w-2 rounded-full bg-gray-500 animate-pulse" />
+      <span className="inline-flex items-center gap-2 text-sm text-secondary">
+        <StatusDot tone="neutral" />
         Checking Ollama…
       </span>
     );
@@ -18,10 +38,10 @@ export function StatusIndicator({ status, loading }: StatusIndicatorProps) {
   if (!status?.online) {
     return (
       <span
-        className="inline-flex items-center gap-2 text-sm text-red-300"
+        className="inline-flex items-center gap-2 text-sm text-danger"
         title={status?.error}
       >
-        <span className="h-2 w-2 rounded-full bg-red-400" />
+        <StatusDot tone="danger" />
         Ollama offline
       </span>
     );
@@ -29,16 +49,25 @@ export function StatusIndicator({ status, loading }: StatusIndicatorProps) {
 
   if (!status.selectedModelAvailable) {
     return (
-      <span className="inline-flex items-center gap-2 text-sm text-amber-300">
-        <span className="h-2 w-2 rounded-full bg-amber-400" />
-        Model missing
+      <span className="inline-flex items-center gap-2 text-sm text-warning">
+        <StatusDot tone="warning" />
+        Chat model missing
+      </span>
+    );
+  }
+
+  if (requireEmbedding && !status.embeddingModelAvailable) {
+    return (
+      <span className="inline-flex items-center gap-2 text-sm text-warning">
+        <StatusDot tone="warning" />
+        Embedding model missing
       </span>
     );
   }
 
   return (
-    <span className="inline-flex items-center gap-2 text-sm text-emerald-300">
-      <span className="h-2 w-2 rounded-full bg-emerald-400" />
+    <span className="inline-flex items-center gap-2 text-sm text-success">
+      <StatusDot tone="success" />
       Ollama ready
     </span>
   );

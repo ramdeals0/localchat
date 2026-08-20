@@ -8,6 +8,7 @@ import type {
 } from "@localchat/shared";
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
+import type { DocumentRepository } from "./document-repository.js";
 import { getDatabase } from "./database.js";
 
 interface ConversationRow {
@@ -63,7 +64,10 @@ export class ChatRepository {
     return rows.map(mapConversation);
   }
 
-  getConversation(id: string): ConversationWithMessages | null {
+  getConversation(
+    id: string,
+    documentRepo?: DocumentRepository,
+  ): ConversationWithMessages | null {
     const row = this.db
       .prepare(
         `SELECT id, title, system_prompt, model, created_at, updated_at
@@ -75,7 +79,7 @@ export class ChatRepository {
       return null;
     }
 
-    const messages = this.getMessages(id);
+    const messages = this.getMessages(id, documentRepo);
     return { ...mapConversation(row), messages };
   }
 
@@ -151,6 +155,8 @@ export class ChatRepository {
     const result = this.db
       .prepare("DELETE FROM conversations WHERE id = ?")
       .run(id);
+    if (result.changes > 0) {
+    }
     return result.changes > 0;
   }
 
@@ -160,7 +166,7 @@ export class ChatRepository {
       .run(Date.now(), id);
   }
 
-  getMessages(conversationId: string): Message[] {
+  getMessages(conversationId: string, documentRepo?: DocumentRepository): Message[] {
     const rows = this.db
       .prepare(
         `SELECT id, conversation_id, role, content, created_at
@@ -170,7 +176,19 @@ export class ChatRepository {
       )
       .all(conversationId) as MessageRow[];
 
-    return rows.map(mapMessage);
+    const messages = rows.map(mapMessage);
+    if (!documentRepo || messages.length === 0) {
+      return messages;
+    }
+
+    const citationMap = documentRepo.getCitationsForMessages(
+      messages.map((message) => message.id),
+    );
+
+    return messages.map((message) => ({
+      ...message,
+      citations: citationMap.get(message.id),
+    }));
   }
 
   addMessage(
@@ -194,6 +212,9 @@ export class ChatRepository {
       .run(message);
 
     this.touchConversation(conversationId);
+    const conversation = this.db
+      .prepare("SELECT id, title, model FROM conversations WHERE id = ?")
+      .get(conversationId) as { id: string; title: string; model: string };
     return message;
   }
 
@@ -212,7 +233,11 @@ export class ChatRepository {
     this.db.prepare("UPDATE messages SET content = ? WHERE id = ?").run(content, id);
     this.touchConversation(row.conversation_id);
 
-    return { ...mapMessage(row), content };
+    const updated = { ...mapMessage(row), content };
+    const conversation = this.db
+      .prepare("SELECT id, title, model FROM conversations WHERE id = ?")
+      .get(row.conversation_id) as { id: string; title: string; model: string };
+    return updated;
   }
 
   deleteMessage(id: string): boolean {
@@ -251,15 +276,77 @@ export class ChatRepository {
   }
 
   clearMessages(conversationId: string): number {
+    const messages = this.getMessages(conversationId);
     const result = this.db
       .prepare("DELETE FROM messages WHERE conversation_id = ?")
       .run(conversationId);
 
     if (result.changes > 0) {
       this.touchConversation(conversationId);
+      for (const message of messages) {
+      }
     }
 
     return result.changes;
+  }
+
+  deleteMessagesFrom(conversationId: string, messageId: string): number {
+    const messages = this.getMessages(conversationId);
+    const index = messages.findIndex((message) => message.id === messageId);
+    if (index === -1) {
+      return 0;
+    }
+
+    const deleteStmt = this.db.prepare("DELETE FROM messages WHERE id = ?");
+    let removed = 0;
+    for (const message of messages.slice(index)) {
+      const result = deleteStmt.run(message.id);
+      removed += result.changes;
+    }
+
+    if (removed > 0) {
+      this.touchConversation(conversationId);
+      for (const message of messages.slice(index)) {
+      }
+    }
+
+    return removed;
+  }
+
+  branchConversation(
+    sourceId: string,
+    untilMessageId: string,
+    defaultModel: string,
+  ): ConversationWithMessages | null {
+    const source = this.getConversation(sourceId);
+    if (!source) {
+      return null;
+    }
+
+    const untilIndex = source.messages.findIndex(
+      (message) => message.id === untilMessageId,
+    );
+    if (untilIndex === -1) {
+      return null;
+    }
+
+    const branchTitle = `${source.title} (branch)`;
+    const created = this.createConversation(
+      {
+        title: branchTitle,
+        systemPrompt: source.systemPrompt,
+        model: source.model ?? defaultModel,
+      },
+      defaultModel,
+    );
+
+    for (const message of source.messages.slice(0, untilIndex + 1)) {
+      if (message.role === "user" || message.role === "assistant") {
+        this.addMessage(created.id, message.role, message.content);
+      }
+    }
+
+    return this.getConversation(created.id);
   }
 }
 

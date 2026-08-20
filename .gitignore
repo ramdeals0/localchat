@@ -8,6 +8,6 @@ server/data/
 *.db
 *.db-shm
 *.db-wal
-*.log
-.DS_Store
+data/documents/*
+!data/documents/.gitkeep
 coverage/

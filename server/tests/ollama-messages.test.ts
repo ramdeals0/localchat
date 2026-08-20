@@ -77,6 +77,18 @@ describe("Ollama message mapping", () => {
     expect(request.messages[0]?.role).toBe("system");
   });
 
+  it("includes RAG context in the combined system message", () => {
+    const mapped = mapMessagesToOllama(
+      "Be concise",
+      baseMessages,
+      "[Source: notes.txt, chunk 0]\nRefund policy details",
+    );
+
+    expect(mapped[0]?.role).toBe("system");
+    expect(mapped[0]?.content).toContain("Be concise");
+    expect(mapped[0]?.content).toContain("Refund policy details");
+  });
+
   it("strips trailing assistant messages for regeneration", () => {
     const trimmed = messagesForRegeneration(baseMessages);
     expect(trimmed).toHaveLength(3);

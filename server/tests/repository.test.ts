@@ -87,6 +87,32 @@ describe("ChatRepository", () => {
     expect(repo.getMessages(conversation.id)).toHaveLength(0);
   });
 
+  it("branches a conversation up to a selected message", () => {
+    const conversation = repo.createConversation({ title: "Main" }, "qwen2.5:7b");
+    repo.addMessage(conversation.id, "user", "Hello");
+    repo.addMessage(conversation.id, "assistant", "Hi");
+    const followUp = repo.addMessage(conversation.id, "user", "More");
+
+    const branched = repo.branchConversation(
+      conversation.id,
+      followUp.id,
+      "qwen2.5:7b",
+    );
+
+    expect(branched?.messages).toHaveLength(3);
+    expect(branched?.title).toContain("branch");
+  });
+
+  it("deletes messages from a specific message onward", () => {
+    const conversation = repo.createConversation({}, "qwen2.5:7b");
+    repo.addMessage(conversation.id, "user", "One");
+    const second = repo.addMessage(conversation.id, "assistant", "Two");
+    repo.addMessage(conversation.id, "user", "Three");
+
+    expect(repo.deleteMessagesFrom(conversation.id, second.id)).toBe(2);
+    expect(repo.getMessages(conversation.id)).toHaveLength(1);
+  });
+
   it("exports conversation to markdown", () => {
     const conversation = repo.createConversation(
       { title: "Export me", systemPrompt: "System rules" },

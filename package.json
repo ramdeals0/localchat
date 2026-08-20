@@ -6,13 +6,16 @@
   "workspaces": [
     "client",
     "server",
-    "shared"
+    "shared",
+    "desktop"
   ],
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
-    "test": "npm run test -w server",
-    "start": "npm run start -w server"
+    "test": "npm run test -w server && npm run test -w client",
+    "start": "npm run start -w server",
+    "desktop:dev": "npm run dev -w desktop",
+    "desktop:build": "npm run build -w desktop"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

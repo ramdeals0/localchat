@@ -4,15 +4,42 @@ export default {
   theme: {
     extend: {
       colors: {
-        surface: {
-          DEFAULT: "#111827",
-          raised: "#1f2937",
-          border: "#374151",
-        },
+        base: "var(--color-bg-base)",
+        elevated: "var(--color-bg-elevated)",
+        muted: "var(--color-bg-muted)",
+        primary: "var(--color-text-primary)",
+        secondary: "var(--color-text-secondary)",
         accent: {
-          DEFAULT: "#22c55e",
-          muted: "#166534",
+          DEFAULT: "var(--color-accent)",
+          muted: "var(--color-accent-muted)",
+          text: "var(--color-accent-text)",
         },
+        border: {
+          subtle: "var(--color-border-subtle)",
+          strong: "var(--color-border-strong)",
+        },
+        danger: "var(--color-danger)",
+        warning: "var(--color-warning)",
+        success: "var(--color-success)",
+        info: "var(--color-info)",
+      },
+      borderRadius: {
+        sm: "var(--radius-sm)",
+        md: "var(--radius-md)",
+        lg: "var(--radius-lg)",
+        xl: "var(--radius-xl)",
+      },
+      boxShadow: {
+        panel: "var(--shadow-sm)",
+        overlay: "var(--shadow-md)",
+      },
+      transitionDuration: {
+        standard: "var(--motion-standard)",
+        fast: "var(--motion-fast)",
+      },
+      width: {
+        sidebar: "var(--sidebar-width)",
+        context: "var(--context-width)",
       },
     },
   },

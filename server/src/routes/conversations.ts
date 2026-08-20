@@ -1,9 +1,13 @@
 import type { CreateConversationRequest, UpdateConversationRequest } from "@localchat/shared";
 import { Router } from "express";
 import { appConfig } from "../config.js";
+import type { DocumentRepository } from "../db/document-repository.js";
 import { ChatRepository, conversationToMarkdown } from "../db/repository.js";
 
-export function createConversationsRouter(repo: ChatRepository): Router {
+export function createConversationsRouter(
+  repo: ChatRepository,
+  documentRepo?: DocumentRepository,
+): Router {
   const router = Router();
 
   router.get("/", (_req, res) => {
@@ -17,7 +21,7 @@ export function createConversationsRouter(repo: ChatRepository): Router {
   });
 
   router.get("/:id", (req, res) => {
-    const conversation = repo.getConversation(req.params.id);
+    const conversation = repo.getConversation(req.params.id, documentRepo);
     if (!conversation) {
       res.status(404).json({ error: "Conversation not found" });
       return;
@@ -45,7 +49,7 @@ export function createConversationsRouter(repo: ChatRepository): Router {
   });
 
   router.delete("/:id/messages", (req, res) => {
-    const conversation = repo.getConversation(req.params.id);
+    const conversation = repo.getConversation(req.params.id, documentRepo);
     if (!conversation) {
       res.status(404).json({ error: "Conversation not found" });
       return;
@@ -54,8 +58,42 @@ export function createConversationsRouter(repo: ChatRepository): Router {
     res.json({ cleared: count });
   });
 
+  router.delete("/:id/messages/from/:messageId", (req, res) => {
+    const conversation = repo.getConversation(req.params.id, documentRepo);
+    if (!conversation) {
+      res.status(404).json({ error: "Conversation not found" });
+      return;
+    }
+    const removed = repo.deleteMessagesFrom(
+      req.params.id,
+      req.params.messageId,
+    );
+    res.json({ removed });
+  });
+
+  router.post("/:id/branch", (req, res) => {
+    const untilMessageId =
+      typeof req.body?.untilMessageId === "string"
+        ? req.body.untilMessageId
+        : null;
+    if (!untilMessageId) {
+      res.status(400).json({ error: "untilMessageId is required" });
+      return;
+    }
+    const branched = repo.branchConversation(
+      req.params.id,
+      untilMessageId,
+      appConfig.defaultModel,
+    );
+    if (!branched) {
+      res.status(404).json({ error: "Conversation or message not found" });
+      return;
+    }
+    res.status(201).json(branched);
+  });
+
   router.get("/:id/export/markdown", (req, res) => {
-    const conversation = repo.getConversation(req.params.id);
+    const conversation = repo.getConversation(req.params.id, documentRepo);
     if (!conversation) {
       res.status(404).json({ error: "Conversation not found" });
       return;
@@ -68,7 +106,7 @@ export function createConversationsRouter(repo: ChatRepository): Router {
   });
 
   router.get("/:id/export/json", (req, res) => {
-    const conversation = repo.getConversation(req.params.id);
+    const conversation = repo.getConversation(req.params.id, documentRepo);
     if (!conversation) {
       res.status(404).json({ error: "Conversation not found" });
       return;

@@ -3,17 +3,34 @@ import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appConfig } from "./config.js";
+import { DocumentRepository } from "./db/document-repository.js";
 import { getDatabase } from "./db/database.js";
+import { PromptRepository } from "./db/prompt-repository.js";
 import { ChatRepository } from "./db/repository.js";
+import { createBackupRouter } from "./routes/backup.js";
 import { createChatRouter } from "./routes/chat.js";
 import { createConversationsRouter } from "./routes/conversations.js";
+import { createDocumentsRouter } from "./routes/documents.js";
 import { healthRouter, modelsRouter } from "./routes/health.js";
+import { createPromptsRouter } from "./routes/prompts.js";
+import { ragRouter } from "./routes/rag.js";
+import { createSearchRouter } from "./routes/search.js";
+import { seedPromptTemplates, syncBuiltInPromptUpdates } from "./db/prompt-seed.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApp(): express.Application {
   getDatabase();
-  const repo = new ChatRepository();
+  const chatRepo = new ChatRepository();
+  const documentRepo = new DocumentRepository();
+  const promptRepo = new PromptRepository();
+
+  try {
+    seedPromptTemplates(promptRepo);
+    syncBuiltInPromptUpdates(promptRepo);
+  } catch (error) {
+    console.warn("Prompt seed failed:", error);
+  }
 
   const app = express();
 
@@ -34,8 +51,13 @@ export function createApp(): express.Application {
 
   app.use("/api/status", healthRouter);
   app.use("/api/models", modelsRouter);
-  app.use("/api/conversations", createConversationsRouter(repo));
-  app.use("/api/chat", createChatRouter(repo));
+  app.use("/api/conversations", createConversationsRouter(chatRepo, documentRepo));
+  app.use("/api/chat", createChatRouter(chatRepo, documentRepo));
+  app.use("/api/documents", createDocumentsRouter(documentRepo));
+  app.use("/api/rag", ragRouter);
+  app.use("/api/prompts", createPromptsRouter(promptRepo, chatRepo));
+  app.use("/api/search", createSearchRouter());
+  app.use("/api/backup", createBackupRouter(chatRepo, promptRepo, documentRepo));
 
   const clientDist = path.resolve(__dirname, "../../client/dist");
   app.use(express.static(clientDist));

@@ -1,21 +1,69 @@
-import type { RegenerateRequest, SendMessageRequest } from "@localchat/shared";
+import type {
+  DocumentScope,
+  MessageCitation,
+  RegenerateRequest,
+  SendMessageRequest,
+} from "@localchat/shared";
 import { Router } from "express";
+import { appConfig } from "../config.js";
+import { DocumentRepository } from "../db/document-repository.js";
 import { ChatRepository } from "../db/repository.js";
 import { ollamaClient } from "../ollama/client.js";
 import {
   buildOllamaChatRequest,
   messagesForRegeneration,
 } from "../ollama/messages.js";
+import { citationsToMessageCitations } from "../rag/context.js";
+import { ragService } from "../rag/retriever.js";
 import { endSse, initSse, sendSseEvent } from "../sse/helpers.js";
 
+interface RagOptions {
+  useDocuments?: boolean;
+  documentScope?: DocumentScope;
+  documentIds?: string[];
+  userQuery?: string;
+}
+
+async function resolveRagContext(
+  options: RagOptions,
+): Promise<{
+  ragContext: string;
+  citations: Omit<MessageCitation, "id">[];
+  noRelevantSources: boolean;
+}> {
+  if (!options.useDocuments || !appConfig.ragEnabled || !options.userQuery) {
+    return { ragContext: "", citations: [], noRelevantSources: false };
+  }
+
+  const documentIds =
+    options.documentScope === "selected" ? options.documentIds : undefined;
+
+  const search = await ragService.search(options.userQuery, documentIds);
+  if (search.noRelevantSources) {
+    return { ragContext: "", citations: [], noRelevantSources: true };
+  }
+
+  return {
+    ragContext: ragService.buildContext(search.results),
+    citations: citationsToMessageCitations("pending", search.results),
+    noRelevantSources: false,
+  };
+}
+
 async function streamAssistantReply(
-  repo: ChatRepository,
+  chatRepo: ChatRepository,
+  documentRepo: DocumentRepository,
   conversationId: string,
   model: string,
   signal: AbortSignal,
   onToken: (token: string) => void,
+  ragOptions: RagOptions,
+  onSources?: (payload: {
+    citations: MessageCitation[];
+    noRelevantSources: boolean;
+  }) => void,
 ): Promise<{ messageId: string; content: string }> {
-  const conversation = repo.getConversation(conversationId);
+  const conversation = chatRepo.getConversation(conversationId, documentRepo);
   if (!conversation) {
     throw new Error("Conversation not found");
   }
@@ -30,10 +78,22 @@ async function streamAssistantReply(
     );
   }
 
+  const rag = await resolveRagContext(ragOptions);
+  if (onSources) {
+    onSources({
+      citations: rag.citations.map((citation, index) => ({
+        ...citation,
+        id: `temp-${index}`,
+      })),
+      noRelevantSources: rag.noRelevantSources,
+    });
+  }
+
   const request = buildOllamaChatRequest(
     model,
     conversation.systemPrompt,
     conversation.messages,
+    rag.ragContext || undefined,
   );
 
   let content = "";
@@ -42,11 +102,25 @@ async function streamAssistantReply(
     onToken(token);
   }
 
-  const saved = repo.addMessage(conversationId, "assistant", content);
+  const saved = chatRepo.addMessage(conversationId, "assistant", content);
+  if (rag.citations.length > 0) {
+    const persisted = documentRepo.saveCitations(
+      saved.id,
+      rag.citations.map((citation) => ({
+        ...citation,
+        messageId: saved.id,
+      })),
+    );
+    saved.citations = persisted;
+  }
+
   return { messageId: saved.id, content };
 }
 
-export function createChatRouter(repo: ChatRepository): Router {
+export function createChatRouter(
+  chatRepo: ChatRepository,
+  documentRepo = new DocumentRepository(),
+): Router {
   const router = Router();
 
   router.post("/:id/messages", async (req, res) => {
@@ -59,30 +133,52 @@ export function createChatRouter(repo: ChatRepository): Router {
       return;
     }
 
-    const conversation = repo.getConversation(conversationId);
+    const conversation = chatRepo.getConversation(conversationId, documentRepo);
     if (!conversation) {
       res.status(404).json({ error: "Conversation not found" });
       return;
     }
 
-    repo.addMessage(conversationId, "user", content);
+    chatRepo.addMessage(conversationId, "user", content);
 
     initSse(res);
     const abortController = new AbortController();
 
-    req.on("close", () => {
+    const abortStream = () => {
       if (!res.writableEnded) {
         abortController.abort();
       }
-    });
+    };
+
+    req.on("aborted", abortStream);
+    res.on("close", abortStream);
 
     try {
+      let sentSources = false;
       const result = await streamAssistantReply(
-        repo,
+        chatRepo,
+        documentRepo,
         conversationId,
         conversation.model,
         abortController.signal,
         (token) => sendSseEvent(res, { type: "token", content: token }),
+        {
+          useDocuments: body.useDocuments,
+          documentScope: body.documentScope,
+          documentIds: body.documentIds,
+          userQuery: content,
+        },
+        ({ citations, noRelevantSources }) => {
+          if (sentSources) {
+            return;
+          }
+          sentSources = true;
+          sendSseEvent(res, {
+            type: "sources",
+            citations,
+            noRelevantSources,
+          });
+        },
       );
 
       sendSseEvent(res, {
@@ -109,7 +205,7 @@ export function createChatRouter(repo: ChatRepository): Router {
     const conversationId = req.params.id;
     const body = (req.body ?? {}) as RegenerateRequest;
 
-    const conversation = repo.getConversation(conversationId);
+    const conversation = chatRepo.getConversation(conversationId, documentRepo);
     if (!conversation) {
       res.status(404).json({ error: "Conversation not found" });
       return;
@@ -123,8 +219,8 @@ export function createChatRouter(repo: ChatRepository): Router {
       return;
     }
 
-    repo.deleteLastAssistantMessage(conversationId);
-    const refreshed = repo.getConversation(conversationId);
+    chatRepo.deleteLastAssistantMessage(conversationId);
+    const refreshed = chatRepo.getConversation(conversationId, documentRepo);
     if (!refreshed) {
       res.status(404).json({ error: "Conversation not found" });
       return;
@@ -136,11 +232,14 @@ export function createChatRouter(repo: ChatRepository): Router {
     initSse(res);
     const abortController = new AbortController();
 
-    req.on("close", () => {
+    const abortStream = () => {
       if (!res.writableEnded) {
         abortController.abort();
       }
-    });
+    };
+
+    req.on("aborted", abortStream);
+    res.on("close", abortStream);
 
     try {
       const status = await ollamaClient.getStatus(model);
@@ -151,10 +250,27 @@ export function createChatRouter(repo: ChatRepository): Router {
         throw new Error(`Model "${model}" is not installed`);
       }
 
+      const rag = await resolveRagContext({
+        useDocuments: body.useDocuments,
+        documentScope: body.documentScope,
+        documentIds: body.documentIds,
+        userQuery: lastUser.content,
+      });
+
+      sendSseEvent(res, {
+        type: "sources",
+        citations: rag.citations.map((citation, index) => ({
+          ...citation,
+          id: `temp-${index}`,
+        })),
+        noRelevantSources: rag.noRelevantSources,
+      });
+
       const request = buildOllamaChatRequest(
         model,
         refreshed.systemPrompt,
         contextMessages,
+        rag.ragContext || undefined,
       );
 
       let content = "";
@@ -166,7 +282,18 @@ export function createChatRouter(repo: ChatRepository): Router {
         sendSseEvent(res, { type: "token", content: token });
       }
 
-      const saved = repo.addMessage(conversationId, "assistant", content);
+      const saved = chatRepo.addMessage(conversationId, "assistant", content);
+      if (rag.citations.length > 0) {
+        const persisted = documentRepo.saveCitations(
+          saved.id,
+          rag.citations.map((citation) => ({
+            ...citation,
+            messageId: saved.id,
+          })),
+        );
+        saved.citations = persisted;
+      }
+
       sendSseEvent(res, {
         type: "done",
         messageId: saved.id,

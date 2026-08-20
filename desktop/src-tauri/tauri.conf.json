@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "LocalChat",
+  "version": "1.0.0",
+  "identifier": "com.localchat.app",
+  "build": {
+    "beforeDevCommand": "npm run build:backend --prefix .. && npm run dev -w client",
+    "devUrl": "http://127.0.0.1:5173",
+    "beforeBuildCommand": "npm run build -w shared --prefix .. && npm run build -w server --prefix .. && npm run build -w client --prefix ..",
+    "frontendDist": "../client/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LocalChat",
+        "width": 1440,
+        "height": 900,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis"],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "bin/localchat-server"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

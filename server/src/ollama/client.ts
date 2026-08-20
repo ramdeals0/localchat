@@ -1,14 +1,27 @@
-import type { OllamaChatRequest, OllamaModel, OllamaStatus, OllamaTagsResponse } from "@localchat/shared";
+import type {
+  OllamaChatRequest,
+  OllamaEmbedResponse,
+  OllamaModel,
+  OllamaStatus,
+  OllamaTagsResponse,
+} from "@localchat/shared";
 import { appConfig } from "../config.js";
 
 export class OllamaClient {
   constructor(
     private readonly baseUrl: string = appConfig.ollamaBaseUrl,
     private readonly defaultModel: string = appConfig.defaultModel,
+    private readonly embeddingModel: string = appConfig.embeddingModel,
   ) {}
 
   private url(path: string): string {
     return `${this.baseUrl.replace(/\/$/, "")}${path}`;
+  }
+
+  private isModelAvailable(modelNames: string[], model: string): boolean {
+    return modelNames.some(
+      (name) => name === model || name.startsWith(`${model}:`),
+    );
   }
 
   async fetchTags(): Promise<OllamaModel[]> {
@@ -34,14 +47,16 @@ export class OllamaClient {
     try {
       const models = await this.fetchTags();
       const modelNames = models.map((m) => m.name);
-      const selectedModelAvailable = modelNames.some(
-        (name) => name === modelToCheck || name.startsWith(`${modelToCheck}:`),
-      );
 
       return {
         online: true,
         defaultModel: this.defaultModel,
-        selectedModelAvailable,
+        selectedModelAvailable: this.isModelAvailable(modelNames, modelToCheck),
+        embeddingModelAvailable: this.isModelAvailable(
+          modelNames,
+          this.embeddingModel,
+        ),
+        embeddingModel: this.embeddingModel,
         models,
       };
     } catch (error) {
@@ -49,10 +64,38 @@ export class OllamaClient {
         online: false,
         defaultModel: this.defaultModel,
         selectedModelAvailable: false,
+        embeddingModelAvailable: false,
+        embeddingModel: this.embeddingModel,
         models: [],
         error: error instanceof Error ? error.message : "Ollama unavailable",
       };
     }
+  }
+
+  async embedText(prompt: string, signal?: AbortSignal): Promise<number[]> {
+    const response = await fetch(this.url("/api/embeddings"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: this.embeddingModel,
+        prompt,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(
+        body || `Ollama embedding request failed (${response.status})`,
+      );
+    }
+
+    const data = (await response.json()) as OllamaEmbedResponse;
+    if (!Array.isArray(data.embedding) || data.embedding.length === 0) {
+      throw new Error("Ollama returned an empty embedding");
+    }
+
+    return data.embedding;
   }
 
   async *streamChat(

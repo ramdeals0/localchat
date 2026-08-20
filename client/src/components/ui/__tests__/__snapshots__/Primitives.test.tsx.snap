@@ -1,0 +1,10 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`UI primitives > renders button snapshot 1`] = `
+<button
+  class="motion-standard inline-flex items-center justify-center gap-2 rounded-lg font-medium disabled:cursor-not-allowed disabled:opacity-50 bg-accent text-[var(--color-text-inverse)] hover:brightness-105 border border-transparent px-4 py-2 text-sm "
+  type="button"
+>
+  Send
+</button>
+`;

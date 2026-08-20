@@ -1,22 +1,24 @@
-import type {
-  Message,
-  OllamaChatMessage,
-  OllamaChatRequest,
-} from "@localchat/shared";
+import type { Message, OllamaChatMessage, OllamaChatRequest } from "@localchat/shared";
 
-/**
- * Maps stored chat messages plus an optional system prompt into Ollama's chat format.
- * System prompt is injected as the first message when non-empty.
- */
 export function mapMessagesToOllama(
   systemPrompt: string,
   messages: Message[],
+  ragContext?: string,
 ): OllamaChatMessage[] {
   const ollamaMessages: OllamaChatMessage[] = [];
+  const parts: string[] = [];
 
   const trimmedSystem = systemPrompt.trim();
   if (trimmedSystem) {
-    ollamaMessages.push({ role: "system", content: trimmedSystem });
+    parts.push(trimmedSystem);
+  }
+
+  if (ragContext?.trim()) {
+    parts.push(ragContext.trim());
+  }
+
+  if (parts.length > 0) {
+    ollamaMessages.push({ role: "system", content: parts.join("\n\n") });
   }
 
   for (const message of messages) {
@@ -36,10 +38,11 @@ export function buildOllamaChatRequest(
   model: string,
   systemPrompt: string,
   messages: Message[],
+  ragContext?: string,
 ): OllamaChatRequest {
   return {
     model,
-    messages: mapMessagesToOllama(systemPrompt, messages),
+    messages: mapMessagesToOllama(systemPrompt, messages, ragContext),
     stream: true,
   };
 }
